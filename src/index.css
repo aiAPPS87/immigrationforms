@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Source Sans 3', 'Source Sans Pro', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3 {
+    font-family: 'Playfair Display', Georgia, serif;
+  }
+
+  *:focus-visible {
+    outline: 3px solid #f59e0b;
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  .wizard-card {
+    @apply bg-white rounded-2xl shadow-lg border border-stone-100 p-8 w-full max-w-2xl mx-auto;
+  }
+
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-navy-800 text-white font-semibold rounded-xl
+           hover:bg-navy-700 active:bg-navy-900 transition-colors duration-150
+           focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-2 focus-visible:outline-none;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-white text-navy-800 font-semibold rounded-xl
+           border-2 border-navy-200 hover:bg-navy-50 active:bg-navy-100 transition-colors duration-150;
+  }
+
+  .btn-amber {
+    @apply inline-flex items-center justify-center gap-2 px-6 py-3 bg-amber-500 text-white font-bold rounded-xl
+           hover:bg-amber-400 active:bg-amber-600 transition-colors duration-150 shadow-md shadow-amber-200;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-3 rounded-xl border-2 border-stone-200 bg-white text-navy-900
+           focus:border-navy-500 focus:ring-2 focus:ring-navy-100 focus:outline-none
+           placeholder:text-stone-400 transition-colors duration-150;
+  }
+
+  .label {
+    @apply block text-lg font-semibold text-navy-900 mb-2 leading-snug;
+  }
+
+  .hint {
+    @apply text-sm text-stone-500 mt-1 mb-3 leading-relaxed;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #f5f3ef; }
+::-webkit-scrollbar-thumb { background: #c9c5bb; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #a09890; }
+
+/* Smooth transitions between wizard steps */
+.step-enter { animation: stepEnter 0.28s cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes stepEnter {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.step-back { animation: stepBack 0.28s cubic-bezier(0.22, 1, 0.36, 1); }
+@keyframes stepBack {
+  from { opacity: 0; transform: translateX(-24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
