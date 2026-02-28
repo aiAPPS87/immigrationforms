@@ -1,6 +1,7 @@
 // FormPath — Immigration Form Guidance Portal
 // Single-file React application | Vite + Tailwind
 import { useState, useReducer, useEffect, useCallback, useRef } from 'react'
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 
 // ─────────────────────────────────────────────
 // FORM DATA — question flows for I-90, N-400, I-131
@@ -1152,46 +1153,227 @@ function ReviewScreen({ state, dispatch, t }) {
 }
 
 // ─────────────────────────────────────────────
+// PDF GENERATION — professional reference document
+// ─────────────────────────────────────────────
+async function generateFormPDF(form, answers) {
+  const pdfDoc = await PDFDocument.create()
+  const fontReg  = await pdfDoc.embedFont(StandardFonts.Helvetica)
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+
+  const PW = 612, PH = 792, M = 50
+  const CW = PW - M * 2
+
+  const NAVY  = rgb(14/255,  39/255,  70/255)
+  const AMBER = rgb(245/255, 158/255, 11/255)
+  const WHITE = rgb(1, 1, 1)
+  const DARK  = rgb(0.15, 0.15, 0.15)
+  const MID   = rgb(0.45, 0.45, 0.45)
+  const LIGHT = rgb(0.92, 0.92, 0.92)
+  const AMBER_BG = rgb(1, 0.98, 0.93)
+
+  // ── multiline text helper ──────────────────
+  // Returns lines split to fit maxChars per line
+  const wrapText = (text, maxChars) => {
+    if (!text) return ['']
+    const words = String(text).split(' ')
+    const lines = []
+    let current = ''
+    for (const w of words) {
+      if ((current + ' ' + w).trim().length > maxChars) {
+        if (current) lines.push(current.trim())
+        current = w
+      } else {
+        current = current ? current + ' ' + w : w
+      }
+    }
+    if (current) lines.push(current.trim())
+    return lines.length ? lines : ['']
+  }
+
+  // ── page management ────────────────────────
+  let page = null
+  let y = 0
+  const allPages = []
+
+  const newPage = (isFirst = false) => {
+    page = pdfDoc.addPage([PW, PH])
+    allPages.push(page)
+    y = PH - M
+
+    if (!isFirst) {
+      // Continuation header
+      page.drawRectangle({ x: 0, y: PH - 26, width: PW, height: 26, color: NAVY })
+      page.drawText('FORMPATH', { x: M, y: PH - 17, size: 8, font: fontBold, color: AMBER })
+      page.drawText(`  ${form.formId} — ${form.shortTitle} (continued)`,
+        { x: M + 55, y: PH - 17, size: 8, font: fontReg, color: WHITE })
+      y = PH - 38
+    }
+  }
+
+  const ensureSpace = (needed) => {
+    if (y - needed < M + 40) newPage()
+  }
+
+  // ══════════════════════════════════════════
+  // PAGE 1 — Hero header
+  // ══════════════════════════════════════════
+  newPage(true)
+
+  // Navy header band
+  page.drawRectangle({ x: 0, y: PH - 90, width: PW, height: 90, color: NAVY })
+
+  // Top row: brand
+  page.drawText('FORMPATH', { x: M, y: PH - 22, size: 11, font: fontBold, color: AMBER })
+  page.drawText('Immigration Form Assistant', { x: M + 88, y: PH - 22, size: 9, font: fontReg, color: rgb(0.65, 0.78, 0.95) })
+
+  // Date
+  const dateStr = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+  page.drawText(`Generated: ${dateStr}`,
+    { x: PW - M - 130, y: PH - 22, size: 7.5, font: fontReg, color: rgb(0.55, 0.68, 0.85) })
+
+  // Form ID + title
+  page.drawText(form.formId,
+    { x: M, y: PH - 54, size: 26, font: fontBold, color: WHITE })
+  const titleX = M + fontBold.widthOfTextAtSize(form.formId, 26) + 12
+  page.drawText(form.title,
+    { x: titleX, y: PH - 54, size: 12, font: fontReg, color: rgb(0.8, 0.88, 1), maxWidth: PW - titleX - M })
+
+  // Filing info strip
+  page.drawText(`Filing fee: ${form.filingFee}   |   Est. completion: ${form.estimatedTime}   |   Difficulty: ${form.difficulty}`,
+    { x: M, y: PH - 76, size: 8, font: fontReg, color: rgb(0.55, 0.68, 0.85) })
+
+  y = PH - 104
+
+  // ── Instruction banner ────────────────────
+  const bannerH = 58
+  page.drawRectangle({ x: M, y: y - bannerH, width: CW, height: bannerH,
+    color: AMBER_BG, borderColor: AMBER, borderWidth: 1.5 })
+  page.drawText('HOW TO USE THIS DOCUMENT', { x: M + 10, y: y - 14, size: 8, font: fontBold, color: AMBER })
+  page.drawText('These are your answers, ready to transfer into the official USCIS form.',
+    { x: M + 10, y: y - 26, size: 8.5, font: fontReg, color: DARK, maxWidth: CW - 20 })
+  page.drawText(`Download the official blank form at: uscis.gov/forms/${form.formId.toLowerCase()}`,
+    { x: M + 10, y: y - 38, size: 8.5, font: fontReg, color: DARK, maxWidth: CW - 20 })
+  page.drawText('IMPORTANT: This FormPath summary is NOT the official USCIS form. File the official form with USCIS.',
+    { x: M + 10, y: y - 50, size: 7.5, font: fontBold, color: rgb(0.6, 0.15, 0.1), maxWidth: CW - 20 })
+
+  y -= bannerH + 14
+
+  // ══════════════════════════════════════════
+  // SECTIONS + Q&A
+  // ══════════════════════════════════════════
+  for (const section of form.sections) {
+    const visibleQs = section.questions.filter(q => {
+      if (!q.condition) return true
+      return answers[q.condition.field] === q.condition.value
+    })
+    if (visibleQs.length === 0) continue
+
+    ensureSpace(40)
+
+    // Section header bar
+    page.drawRectangle({ x: M, y: y - 22, width: CW, height: 22, color: NAVY })
+    page.drawText(section.title.toUpperCase(),
+      { x: M + 10, y: y - 14, size: 9, font: fontBold, color: WHITE })
+    y -= 30
+
+    for (const q of visibleQs) {
+      const rawVal = answers[q.id]
+      const isAnswered = rawVal !== undefined && String(rawVal).trim() !== ''
+
+      // Format value
+      let displayVal
+      if (!isAnswered) {
+        displayVal = q.required ? '(required — not answered)' : '(not answered)'
+      } else if (rawVal === 'yes') {
+        displayVal = 'Yes'
+      } else if (rawVal === 'no') {
+        displayVal = 'No'
+      } else {
+        displayVal = String(rawVal)
+      }
+
+      const labelWrapped = wrapText(q.label, 88)
+      const valueWrapped = wrapText(displayVal, 75)
+      const blockH = labelWrapped.length * 10 + valueWrapped.length * 13 + 20
+
+      ensureSpace(blockH)
+
+      // Question label (small gray)
+      labelWrapped.forEach((ln, i) => {
+        page.drawText(ln, { x: M + 10, y: y - 10 - i * 10, size: 7.5, font: fontReg, color: MID })
+      })
+      y -= labelWrapped.length * 10 + 4
+
+      // Answer value (larger, bold if answered)
+      if (!isAnswered) {
+        page.drawText(displayVal,
+          { x: M + 10, y: y - 11, size: 9.5, font: fontReg, color: rgb(0.65, 0.65, 0.65), maxWidth: CW - 20 })
+      } else {
+        valueWrapped.forEach((ln, i) => {
+          page.drawText(ln, { x: M + 10, y: y - 11 - i * 13, size: 10.5, font: fontBold, color: DARK })
+        })
+      }
+      y -= valueWrapped.length * 13 + 4
+
+      // Hairline divider
+      page.drawLine({
+        start: { x: M + 10, y: y - 4 }, end: { x: M + CW - 10, y: y - 4 },
+        thickness: 0.4, color: LIGHT,
+      })
+      y -= 12
+    }
+
+    y -= 8
+  }
+
+  // ══════════════════════════════════════════
+  // FOOTER on all pages
+  // ══════════════════════════════════════════
+  const totalPages = allPages.length
+  allPages.forEach((p, i) => {
+    p.drawLine({
+      start: { x: M, y: M + 26 }, end: { x: PW - M, y: M + 26 },
+      thickness: 0.5, color: LIGHT,
+    })
+    p.drawText('Generated by FormPath — formpath.vercel.app',
+      { x: M, y: M + 14, size: 7.5, font: fontReg, color: MID })
+    p.drawText('This is a reference document only. Always file the official USCIS form.',
+      { x: M, y: M + 5, size: 7, font: fontReg, color: rgb(0.65, 0.65, 0.65) })
+    p.drawText(`Page ${i + 1} of ${totalPages}`,
+      { x: PW - M - 46, y: M + 14, size: 7.5, font: fontReg, color: MID })
+  })
+
+  return pdfDoc.save()
+}
+
+// ─────────────────────────────────────────────
 // COMPLETE / DOWNLOAD SCREEN
 // ─────────────────────────────────────────────
 function DownloadScreen({ state, dispatch, t }) {
   const { selectedForm: form, answers } = state
-  const [downloaded, setDownloaded] = useState(false)
+  const [status, setStatus] = useState('idle') // idle | loading | done | error
+  const [errorMsg, setErrorMsg] = useState('')
 
-  const handleDownload = () => {
-    // Build a field map (mock PDF generation)
-    const fieldMap = {}
-    form.sections.forEach(section => {
-      section.questions.forEach(q => {
-        if (answers[q.id] !== undefined) {
-          fieldMap[q.pdfFieldMapping] = answers[q.id]
-        }
-      })
-    })
-    console.log(`[FormPath] Mock PDF field map for ${form.formId}:`, fieldMap)
-
-    // Create a text blob simulating a completed form
-    const lines = [`FORM ${form.formId} — ${form.title.toUpperCase()}`, '='.repeat(60), '']
-    form.sections.forEach(section => {
-      lines.push(`\n--- ${section.title.toUpperCase()} ---`)
-      section.questions.forEach(q => {
-        const val = answers[q.id]
-        if (val) lines.push(`${q.label}\n  → ${val === 'yes' ? 'Yes' : val === 'no' ? 'No' : val}`)
-      })
-    })
-    lines.push('\n' + '='.repeat(60))
-    lines.push('Generated by FormPath — formpath.vercel.app')
-    lines.push('IMPORTANT: This is a guided summary. File the official USCIS form.')
-
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `${form.formId}_FormPath_Summary.txt`
-    a.click()
-    URL.revokeObjectURL(url)
-    setDownloaded(true)
-    clearStorage(form.formId)
+  const handleDownload = async () => {
+    setStatus('loading')
+    try {
+      const pdfBytes = await generateFormPDF(form, answers)
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' })
+      const url  = URL.createObjectURL(blob)
+      const a    = document.createElement('a')
+      a.href     = url
+      a.download = `${form.formId}_FormPath_Answers.pdf`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      clearStorage(form.formId)
+      setStatus('done')
+    } catch (err) {
+      console.error('[FormPath] PDF generation error:', err)
+      setErrorMsg('PDF generation failed. Please try again.')
+      setStatus('error')
+    }
   }
 
   const nextStepsMap = {
@@ -1224,25 +1406,54 @@ function DownloadScreen({ state, dispatch, t }) {
     <div className="min-h-screen bg-stone-50">
       {/* Success header */}
       <div className="text-center py-16 px-6" style={{ background: 'linear-gradient(135deg, #0e2746 0%, #163a69 100%)' }}>
-        <div className="text-7xl mb-6 animate-bounce">🎉</div>
+        <div className={`text-7xl mb-6 ${status !== 'loading' ? 'animate-bounce' : ''}`}>
+          {status === 'loading' ? '⏳' : status === 'done' ? '✅' : status === 'error' ? '⚠️' : '🎉'}
+        </div>
         <h1 className="text-4xl font-bold text-white mb-3" style={{ fontFamily: '"Playfair Display", Georgia, serif' }}>
-          {t.formComplete}
+          {status === 'done' ? 'Download complete!' : t.formComplete}
         </h1>
-        <p className="text-navy-300 text-lg mb-8 max-w-lg mx-auto">{t.completeSub}</p>
+        <p className="text-navy-300 text-lg mb-8 max-w-lg mx-auto">
+          {status === 'loading'
+            ? 'Building your PDF — this takes just a moment…'
+            : status === 'done'
+            ? 'Your completed form reference PDF is in your downloads folder.'
+            : status === 'error'
+            ? errorMsg
+            : 'Download a pre-filled reference PDF with all your answers, ready to transfer into the official USCIS form.'}
+        </p>
+
+        {/* Primary download button */}
         <button
           onClick={handleDownload}
-          className="btn-amber text-xl px-10 py-5 shadow-2xl shadow-amber-500/30"
+          disabled={status === 'loading' || status === 'done'}
+          className={`btn-amber text-xl px-10 py-5 shadow-2xl shadow-amber-500/30 disabled:opacity-60 disabled:cursor-not-allowed ${status === 'loading' ? 'animate-pulse' : ''}`}
         >
-          <Icon.Download /> {t.downloadPDF}
+          {status === 'loading'
+            ? <><span className="inline-block animate-spin mr-2">⚙</span> Generating PDF…</>
+            : status === 'done'
+            ? <><Icon.Check /> Downloaded!</>
+            : <><Icon.Download /> {t.downloadPDF}</>}
         </button>
-        {downloaded && (
-          <p className="mt-4 text-green-400 text-sm flex items-center justify-center gap-2">
-            <Icon.Check /> Downloaded! Check your downloads folder.
-          </p>
+
+        {status === 'done' && (
+          <button onClick={handleDownload} className="block mx-auto mt-4 text-amber-300 hover:text-amber-200 text-sm underline underline-offset-2">
+            Download again
+          </button>
         )}
-        <p className="mt-4 text-navy-400 text-xs max-w-sm mx-auto">
-          This generates a plain-text summary. For the actual USCIS form, visit uscis.gov and complete the official PDF.
-        </p>
+
+        {/* Info box */}
+        <div className="mt-6 max-w-md mx-auto bg-navy-800/50 rounded-xl p-4 text-left border border-navy-600">
+          <p className="text-amber-300 text-xs font-bold uppercase tracking-widest mb-2">What you'll get</p>
+          <ul className="text-navy-200 text-xs space-y-1.5">
+            <li>✔ A formatted PDF with all your answers, organized by section</li>
+            <li>✔ Each answer labeled with the corresponding USCIS question</li>
+            <li>✔ Instructions for obtaining and filing the official form</li>
+          </ul>
+          <p className="text-navy-400 text-xs mt-3">
+            Note: USCIS forms use Adobe XFA technology. Transfer your answers into the official fillable PDF from
+            <span className="text-amber-400"> uscis.gov/forms/{form.formId.toLowerCase()}</span>
+          </p>
+        </div>
       </div>
 
       {/* Next steps */}
@@ -1263,10 +1474,27 @@ function DownloadScreen({ state, dispatch, t }) {
         </div>
 
         {/* Official resource link */}
-        <div className="mt-8 bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center">
-          <p className="text-amber-800 font-semibold mb-2">📎 Official USCIS Resources</p>
-          <p className="text-amber-700 text-sm">Download the official blank {form.formId} form and instructions at:</p>
-          <p className="text-amber-600 font-bold mt-1 text-sm">uscis.gov/forms/{form.formId.toLowerCase()}</p>
+        <div className="mt-8 bg-amber-50 border border-amber-200 rounded-2xl p-6">
+          <p className="text-amber-800 font-semibold mb-3">📎 Official USCIS Resources</p>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <a
+              href={`https://www.uscis.gov/sites/default/files/document/forms/${form.formId.toLowerCase()}.pdf`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-amber-500 text-white font-bold rounded-xl hover:bg-amber-400 transition-colors text-sm"
+            >
+              <Icon.Download /> Download Blank {form.formId} (official)
+            </a>
+            <a
+              href={`https://www.uscis.gov/forms/${form.formId.toLowerCase()}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-white text-amber-800 font-semibold rounded-xl border-2 border-amber-300 hover:bg-amber-50 transition-colors text-sm"
+            >
+              View instructions &amp; fees →
+            </a>
+          </div>
+          <p className="text-amber-600 text-xs mt-3 text-center">Opens uscis.gov — the official U.S. government website</p>
         </div>
 
         {/* Actions */}
