@@ -1345,8 +1345,9 @@ async function fillUSCISPDF(form, answers) {
   const newDoc = await PDFDocument.create()
   const helv   = await newDoc.embedFont(StandardFonts.Helvetica)
 
-  // Render each PDF page to canvas at 3× for high-quality output, embed as lossless PNG
-  const SCALE = 3.0
+  // Render each page at 2× scale (144 DPI effective) with high-quality JPEG.
+  // PNG at 3× caused multi-MB data URLs that crashed fetch() on multi-page forms.
+  const SCALE = 2.0
   for (let pn = 1; pn <= numPages; pn++) {
     const pdfPage = await pdfDoc.getPage(pn)
     const vp     = pdfPage.getViewport({ scale: SCALE })
@@ -1355,17 +1356,20 @@ async function fillUSCISPDF(form, answers) {
     const canvas = document.createElement('canvas')
     canvas.width  = Math.round(vp.width)
     canvas.height = Math.round(vp.height)
-    // alpha:false gives a white background and dramatically improves PNG compression
     const ctx = canvas.getContext('2d', { alpha: false })
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
     await pdfPage.render({ canvasContext: ctx, viewport: vp }).promise
     pdfPage.cleanup()
 
-    // PNG is lossless — no compression artifacts on form lines or printed text
-    const dataUrl  = canvas.toDataURL('image/png')
-    const imgBytes = await fetch(dataUrl).then(r => r.arrayBuffer())
-    const embImg   = await newDoc.embedPng(imgBytes)
+    // Use atob() to decode the data URL synchronously — avoids fetch() failures
+    // on large data URLs that occur with PNG at high scale on multi-page forms.
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
+    const b64     = dataUrl.split(',')[1]
+    const binary  = atob(b64)
+    const imgArr  = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) imgArr[i] = binary.charCodeAt(i)
+    const embImg  = await newDoc.embedJpg(imgArr)
 
     const libPage = newDoc.addPage([origVp.width, origVp.height])
     libPage.drawImage(embImg, { x: 0, y: 0, width: origVp.width, height: origVp.height })
