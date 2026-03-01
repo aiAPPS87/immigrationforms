@@ -1440,7 +1440,7 @@ async function fillUSCISPDF(form, answers) {
         libPage.drawRectangle({ x: x1 - 1, y: y1 - 1, width: fw + 2, height: fh + 2,
           borderColor: rgb(0.85, 0.6, 0), borderWidth: 1.2, opacity: 1 })
         // Small label above the field
-        libPage.drawText('▶ Fill in your SSN here', {
+        libPage.drawText('>> Fill in your SSN here', {
           x: x1, y: y2 + 2,
           size: 6.5, font: helv10,
           color: rgb(0.55, 0.3, 0),
