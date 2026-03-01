@@ -1345,8 +1345,9 @@ async function fillUSCISPDF(form, answers) {
   const newDoc = await PDFDocument.create()
   const helv   = await newDoc.embedFont(StandardFonts.Helvetica)
 
-  // Render each page at 2× scale (144 DPI effective) with high-quality JPEG.
-  // PNG at 3× caused multi-MB data URLs that crashed fetch() on multi-page forms.
+  // Render each page at 2× scale (144 DPI) with high-quality JPEG.
+  // IMPORTANT: do NOT use { alpha: false } — pdfjs uses alpha compositing
+  // internally and will throw/produce blank output if alpha is disabled.
   const SCALE = 2.0
   for (let pn = 1; pn <= numPages; pn++) {
     const pdfPage = await pdfDoc.getPage(pn)
@@ -1356,20 +1357,18 @@ async function fillUSCISPDF(form, answers) {
     const canvas = document.createElement('canvas')
     canvas.width  = Math.round(vp.width)
     canvas.height = Math.round(vp.height)
-    const ctx = canvas.getContext('2d', { alpha: false })
+    // Standard 2D context (alpha required by pdfjs); white fill ensures clean JPEG
+    const ctx = canvas.getContext('2d')
     ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, canvas.width, canvas.height)
     await pdfPage.render({ canvasContext: ctx, viewport: vp }).promise
     pdfPage.cleanup()
 
-    // Use atob() to decode the data URL synchronously — avoids fetch() failures
-    // on large data URLs that occur with PNG at high scale on multi-page forms.
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.95)
-    const b64     = dataUrl.split(',')[1]
-    const binary  = atob(b64)
-    const imgArr  = new Uint8Array(binary.length)
-    for (let i = 0; i < binary.length; i++) imgArr[i] = binary.charCodeAt(i)
-    const embImg  = await newDoc.embedJpg(imgArr)
+    // canvas.toBlob() returns binary directly — no base64 string encoding/decoding
+    const imgBytes = await new Promise((resolve, reject) =>
+      canvas.toBlob(blob => blob ? blob.arrayBuffer().then(resolve) : reject(new Error('canvas.toBlob failed')), 'image/jpeg', 0.95)
+    )
+    const embImg = await newDoc.embedJpg(imgBytes)
 
     const libPage = newDoc.addPage([origVp.width, origVp.height])
     libPage.drawImage(embImg, { x: 0, y: 0, width: origVp.width, height: origVp.height })
