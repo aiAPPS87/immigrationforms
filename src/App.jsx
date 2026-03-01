@@ -1345,8 +1345,8 @@ async function fillUSCISPDF(form, answers) {
   const newDoc = await PDFDocument.create()
   const helv   = await newDoc.embedFont(StandardFonts.Helvetica)
 
-  // Render each PDF page to canvas at 1.5× for quality, embed as JPEG
-  const SCALE = 1.5
+  // Render each PDF page to canvas at 3× for high-quality output, embed as lossless PNG
+  const SCALE = 3.0
   for (let pn = 1; pn <= numPages; pn++) {
     const pdfPage = await pdfDoc.getPage(pn)
     const vp     = pdfPage.getViewport({ scale: SCALE })
@@ -1355,13 +1355,17 @@ async function fillUSCISPDF(form, answers) {
     const canvas = document.createElement('canvas')
     canvas.width  = Math.round(vp.width)
     canvas.height = Math.round(vp.height)
-    await pdfPage.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise
+    // alpha:false gives a white background and dramatically improves PNG compression
+    const ctx = canvas.getContext('2d', { alpha: false })
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    await pdfPage.render({ canvasContext: ctx, viewport: vp }).promise
     pdfPage.cleanup()
 
-    // JPEG for compact file size (form background renders well)
-    const dataUrl  = canvas.toDataURL('image/jpeg', 0.90)
+    // PNG is lossless — no compression artifacts on form lines or printed text
+    const dataUrl  = canvas.toDataURL('image/png')
     const imgBytes = await fetch(dataUrl).then(r => r.arrayBuffer())
-    const embImg   = await newDoc.embedJpg(imgBytes)
+    const embImg   = await newDoc.embedPng(imgBytes)
 
     const libPage = newDoc.addPage([origVp.width, origVp.height])
     libPage.drawImage(embImg, { x: 0, y: 0, width: origVp.width, height: origVp.height })
