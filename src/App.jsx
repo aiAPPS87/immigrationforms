@@ -1366,7 +1366,7 @@ async function fillUSCISPDF(form, answers) {
 
     // canvas.toBlob() returns binary directly — no base64 string encoding/decoding
     const imgBytes = await new Promise((resolve, reject) =>
-      canvas.toBlob(blob => blob ? blob.arrayBuffer().then(resolve) : reject(new Error('canvas.toBlob failed')), 'image/jpeg', 0.95)
+      canvas.toBlob(blob => blob ? blob.arrayBuffer().then(resolve, reject) : reject(new Error('canvas.toBlob failed')), 'image/jpeg', 0.95)
     )
     const embImg = await newDoc.embedJpg(imgBytes)
 
@@ -1657,23 +1657,12 @@ function DownloadScreen({ state, dispatch, t }) {
   const handleDownload = async () => {
     setStatus('loading')
     try {
-      let pdfBytes
-      let filename
-      try {
-        // Primary: render official USCIS form and overlay answers
-        pdfBytes = await fillUSCISPDF(form, answers)
-        filename = `${form.formId}_FormPath_Filled.pdf`
-      } catch (fillErr) {
-        console.warn('[FormPath] XFA fill failed, falling back to reference PDF:', fillErr)
-        // Fallback: branded reference document with all answers
-        pdfBytes = await generateFormPDF(form, answers)
-        filename = `${form.formId}_FormPath_Answers.pdf`
-      }
+      const pdfBytes = await fillUSCISPDF(form, answers)
       const blob = new Blob([pdfBytes], { type: 'application/pdf' })
       const url  = URL.createObjectURL(blob)
       const a    = document.createElement('a')
       a.href     = url
-      a.download = filename
+      a.download = `${form.formId}_FormPath_Filled.pdf`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -1681,8 +1670,8 @@ function DownloadScreen({ state, dispatch, t }) {
       clearStorage(form.formId)
       setStatus('done')
     } catch (err) {
-      console.error('[FormPath] PDF generation error:', err)
-      setErrorMsg('PDF generation failed. Please try again.')
+      console.error('[FormPath] fillUSCISPDF error:', err)
+      setErrorMsg(`PDF generation failed: ${err.message}`)
       setStatus('error')
     }
   }
