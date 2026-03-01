@@ -2,6 +2,9 @@
 // Single-file React application | Vite + Tailwind
 import { useState, useReducer, useEffect, useCallback, useRef } from 'react'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
+import * as pdfjsLib from 'pdfjs-dist'
+import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 
 // ─────────────────────────────────────────────
 // FORM DATA — question flows for I-90, N-400, I-131
@@ -1153,7 +1156,192 @@ function ReviewScreen({ state, dispatch, t }) {
 }
 
 // ─────────────────────────────────────────────
-// PDF GENERATION — professional reference document
+// FIELD MAP — wizard question IDs → XFA field short names
+// Coordinates are fetched live from pdfjs getFieldObjects() at fill time
+// ─────────────────────────────────────────────
+const FIELD_DRAW_MAP = {
+  'I-90': {
+    family_name:    [{ f: 'P1_Line3a_FamilyName[0]',         t: 'text' }],
+    given_name:     [{ f: 'P1_Line3b_GivenName[0]',          t: 'text' }],
+    middle_name:    [{ f: 'P1_Line3c_MiddleName[0]',         t: 'text' }],
+    dob:            [{ f: 'P1_Line9_DateOfBirth[0]',         t: 'text' }],
+    sex: [
+      { f: 'P1_Line8_male[0]',    t: 'check', when: 'Male'   },
+      { f: 'P1_Line8_female[0]',  t: 'check', when: 'Female' },
+    ],
+    country_birth:  [{ f: 'P1_Line11_CountryofBirth[0]',     t: 'text' }],
+    alien_number:   [{ f: 'P1_Line1_AlienNumber[0]',         t: 'text' }],
+    uscis_account:  [{ f: 'P1_Line2_AcctIdentifier[0]',      t: 'text' }],
+    ssn:            [{ f: 'P1_Line16_SSN[0]',                t: 'text' }],
+    street_address: [{ f: 'P1_Line6b_StreetNumberName[0]',   t: 'text' }],
+    city:           [{ f: 'P1_Line6d_CityOrTown[0]',         t: 'text' }],
+    state:          [{ f: 'P1_Line6e_State[0]',              t: 'text' }],
+    zip:            [{ f: 'P1_Line6f_ZipCode[0]',            t: 'text' }],
+    height_ft:      [{ f: 'P3_Line8_HeightFeet[0]',          t: 'text' }],
+    height_in:      [{ f: 'P3_Line8_HeightInches[0]',        t: 'text' }],
+    daytime_phone:  [{ f: 'P5_Line3_DaytimePhoneNumber[0]',  t: 'text' }],
+    mobile_phone:   [{ f: 'P5_Line4_MobilePhoneNumber[0]',   t: 'text' }],
+    email:          [{ f: 'P5_Line5_EmailAddress[0]',        t: 'text' }],
+  },
+  'N-400': {
+    family_name:     [{ f: 'P2_Line1_FamilyName[0]',                        t: 'text' }],
+    given_name:      [{ f: 'P2_Line1_GivenName[0]',                         t: 'text' }],
+    middle_name:     [{ f: 'P2_Line1_MiddleName[0]',                        t: 'text' }],
+    dob:             [{ f: 'P2_Line8_DateOfBirth[0]',                       t: 'text' }],
+    sex: [
+      { f: 'P2_Line7_Gender[0]',  t: 'check', when: 'Male'   },
+      { f: 'P2_Line7_Gender[1]',  t: 'check', when: 'Female' },
+    ],
+    country_birth:   [{ f: 'P2_Line10_CountryOfBirth[0]',                   t: 'text' }],
+    country_citizen: [{ f: 'P2_Line11_CountryOfNationality[0]',             t: 'text' }],
+    alien_number:    [{ f: 'Line1_AlienNumber[0]',                          t: 'text' }],
+    ssn:             [{ f: 'Line12b_SSN[0]',                                t: 'text' }],
+    pr_date:         [{ f: 'P2_Line9_DateBecamePermanentResident[0]',       t: 'text' }],
+    street_address:  [{ f: 'P4_Line1_StreetName[0]',                        t: 'text' }],
+    city:            [{ f: 'P4_Line1_City[0]',                              t: 'text' }],
+    state:           [{ f: 'P4_Line1_State[0]',                             t: 'text' }],
+    zip:             [{ f: 'P4_Line1_ZipCode[0]',                           t: 'text' }],
+    phone:           [{ f: 'P12_Line3_Telephone[0]',                        t: 'text' }],
+    email:           [{ f: 'P12_Line5_Email[0]',                            t: 'text' }],
+    marital_status: [
+      { f: 'P10_Line1_MaritalStatus[1]', t: 'check', when: 'Single (never married)' },
+      { f: 'P10_Line1_MaritalStatus[3]', t: 'check', when: 'Married'                },
+      { f: 'P10_Line1_MaritalStatus[0]', t: 'check', when: 'Divorced'               },
+      { f: 'P10_Line1_MaritalStatus[2]', t: 'check', when: 'Widowed'                },
+      { f: 'P10_Line1_MaritalStatus[5]', t: 'check', when: 'Separated'              },
+    ],
+    spouse_name:     [{ f: 'P10_Line4a_FamilyName[0]',                      t: 'text' }],
+    spouse_dob:      [{ f: 'P10_Line4d_DateofBirth[0]',                     t: 'text' }],
+    employer_name:   [{ f: 'P7_EmployerName1[0]',                           t: 'text' }],
+    occupation:      [{ f: 'P7_OccupationFieldStudy1[0]',                   t: 'text' }],
+  },
+  'I-131': {
+    family_name:     [{ f: 'Part2_Line1_FamilyName[0]',                               t: 'text' }],
+    given_name:      [{ f: 'Part2_Line1_GivenName[0]',                                t: 'text' }],
+    middle_name:     [{ f: 'Part2_Line1_MiddleName[0]',                               t: 'text' }],
+    dob:             [{ f: 'Part2_Line9_DateOfBirth[0]',                              t: 'text' }],
+    sex: [
+      { f: 'Part2_Line8_Gender[1]', t: 'check', when: 'Male'   },
+      { f: 'Part2_Line8_Gender[0]', t: 'check', when: 'Female' },
+    ],
+    country_birth:   [{ f: 'Part2_Line6_CountryOfBirth[0]',                           t: 'text' }],
+    country_citizen: [{ f: 'Part2_Line7_CountryOfCitizenshiporNationality[0]',        t: 'text' }],
+    alien_number:    [{ f: 'Part2_Line5_AlienNumber[0]',                              t: 'text' }],
+    ssn:             [{ f: 'Part2_Line10_SSN[0]',                                     t: 'text' }],
+    street_address:  [{ f: 'Part2_Line3_StreetNumberName[0]',                         t: 'text' }],
+    city:            [{ f: 'Part2_Line3_CityTown[0]',                                 t: 'text' }],
+    state:           [{ f: 'Part2_Line3_State[0]',                                    t: 'text' }],
+    zip:             [{ f: 'Part2_Line3_ZipCode[0]',                                  t: 'text' }],
+    phone:           [{ f: 'Part10_Line1_DayPhone[0]',                                t: 'text' }],
+    email:           [{ f: 'Part10_Line3_Email[0]',                                   t: 'text' }],
+    i94_number:      [{ f: 'Part2_Line13_I94RecordNo[0]',                             t: 'text' }],
+    depart_date:     [{ f: 'P7_Line1_DateOfDeparture[0]',                             t: 'text' }],
+    travel_countries:[{ f: 'P7_Line3_ListCountries[0]',                               t: 'text' }],
+    trip_duration:   [{ f: 'P7_Line5_ExpectedLengthTrip[0]',                          t: 'text' }],
+  },
+}
+
+// ─────────────────────────────────────────────
+// XFA FILL — render USCIS PDF pages to canvas, overlay user answers
+// Returns Uint8Array of the filled PDF bytes
+// ─────────────────────────────────────────────
+async function fillUSCISPDF(form, answers) {
+  // Fetch official USCIS PDF from same-origin /forms/ (no CORS)
+  const resp = await fetch(`/forms/${form.formId}.pdf`)
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} fetching ${form.formId}.pdf`)
+  const pdfBytes = await resp.arrayBuffer()
+
+  // Load with pdfjs to render pages and get field coordinates
+  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes), verbosity: 0 })
+  const pdfDoc = await loadingTask.promise
+  const numPages = pdfDoc.numPages
+
+  // Build short-name → [{page, rect}] lookup from getFieldObjects()
+  const rawFields = (await pdfDoc.getFieldObjects()) || {}
+  const fieldCoords = {}
+  for (const [key, val] of Object.entries(rawFields)) {
+    const short = key.includes('.') ? key.split('.').pop() : key
+    const arr = Array.isArray(val) ? val : [val]
+    fieldCoords[short] = arr.map(a => ({ page: a.page, rect: a.rect }))
+  }
+
+  // Create output pdf-lib document
+  const newDoc = await PDFDocument.create()
+  const helv   = await newDoc.embedFont(StandardFonts.Helvetica)
+
+  // Render each PDF page to canvas at 1.5× for quality, embed as JPEG
+  const SCALE = 1.5
+  for (let pn = 1; pn <= numPages; pn++) {
+    const pdfPage = await pdfDoc.getPage(pn)
+    const vp     = pdfPage.getViewport({ scale: SCALE })
+    const origVp = pdfPage.getViewport({ scale: 1.0 })
+
+    const canvas = document.createElement('canvas')
+    canvas.width  = Math.round(vp.width)
+    canvas.height = Math.round(vp.height)
+    await pdfPage.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise
+    pdfPage.cleanup()
+
+    // JPEG for compact file size (form background renders well)
+    const dataUrl  = canvas.toDataURL('image/jpeg', 0.90)
+    const imgBytes = await fetch(dataUrl).then(r => r.arrayBuffer())
+    const embImg   = await newDoc.embedJpg(imgBytes)
+
+    const libPage = newDoc.addPage([origVp.width, origVp.height])
+    libPage.drawImage(embImg, { x: 0, y: 0, width: origVp.width, height: origVp.height })
+  }
+
+  await pdfDoc.destroy()
+
+  // Overlay user answers at exact field coordinates
+  const drawMap  = FIELD_DRAW_MAP[form.formId] || {}
+  const libPages = newDoc.getPages()
+
+  for (const [qId, actions] of Object.entries(drawMap)) {
+    const val = answers[qId]
+    if (val == null || String(val).trim() === '') continue
+
+    for (const action of actions) {
+      const coords = fieldCoords[action.f]
+      if (!coords) continue
+
+      for (const { page: pageIdx, rect } of coords) {
+        if (!rect || pageIdx == null || pageIdx >= libPages.length) continue
+        const libPage = libPages[pageIdx]
+        const [x1, y1, x2, y2] = rect
+        const fw = x2 - x1
+        const fh = y2 - y1
+
+        if (action.t === 'text') {
+          const fs = Math.min(9, fh * 0.70)
+          libPage.drawText(String(val), {
+            x: x1 + 2,
+            y: y1 + Math.max(1, (fh - fs) / 2),
+            size: fs,
+            font: helv,
+            color: rgb(0.04, 0.04, 0.36),
+            maxWidth: fw - 4,
+          })
+        } else if (action.t === 'check' && action.when === String(val)) {
+          // Filled square checkmark
+          const sz = Math.min(fw, fh) * 0.55
+          const cx = (x1 + x2) / 2
+          const cy = (y1 + y2) / 2
+          libPage.drawRectangle({
+            x: cx - sz / 2, y: cy - sz / 2,
+            width: sz, height: sz,
+            color: rgb(0.04, 0.04, 0.36),
+          })
+        }
+      }
+    }
+  }
+
+  return newDoc.save()
+}
+
+// ─────────────────────────────────────────────
+// PDF GENERATION — professional reference document (fallback)
 // ─────────────────────────────────────────────
 async function generateFormPDF(form, answers) {
   const pdfDoc = await PDFDocument.create()
@@ -1357,12 +1545,23 @@ function DownloadScreen({ state, dispatch, t }) {
   const handleDownload = async () => {
     setStatus('loading')
     try {
-      const pdfBytes = await generateFormPDF(form, answers)
+      let pdfBytes
+      let filename
+      try {
+        // Primary: render official USCIS form and overlay answers
+        pdfBytes = await fillUSCISPDF(form, answers)
+        filename = `${form.formId}_FormPath_Filled.pdf`
+      } catch (fillErr) {
+        console.warn('[FormPath] XFA fill failed, falling back to reference PDF:', fillErr)
+        // Fallback: branded reference document with all answers
+        pdfBytes = await generateFormPDF(form, answers)
+        filename = `${form.formId}_FormPath_Answers.pdf`
+      }
       const blob = new Blob([pdfBytes], { type: 'application/pdf' })
       const url  = URL.createObjectURL(blob)
       const a    = document.createElement('a')
       a.href     = url
-      a.download = `${form.formId}_FormPath_Answers.pdf`
+      a.download = filename
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -1414,12 +1613,12 @@ function DownloadScreen({ state, dispatch, t }) {
         </h1>
         <p className="text-navy-300 text-lg mb-8 max-w-lg mx-auto">
           {status === 'loading'
-            ? 'Building your PDF — this takes just a moment…'
+            ? 'Rendering the official USCIS form and filling in your answers…'
             : status === 'done'
-            ? 'Your completed form reference PDF is in your downloads folder.'
+            ? `Your filled ${form.formId} is in your downloads folder. Review all fields before filing.`
             : status === 'error'
             ? errorMsg
-            : 'Download a pre-filled reference PDF with all your answers, ready to transfer into the official USCIS form.'}
+            : `Download the official USCIS ${form.formId} with your answers pre-filled directly on the form.`}
         </p>
 
         {/* Primary download button */}
@@ -1445,13 +1644,12 @@ function DownloadScreen({ state, dispatch, t }) {
         <div className="mt-6 max-w-md mx-auto bg-navy-800/50 rounded-xl p-4 text-left border border-navy-600">
           <p className="text-amber-300 text-xs font-bold uppercase tracking-widest mb-2">What you'll get</p>
           <ul className="text-navy-200 text-xs space-y-1.5">
-            <li>✔ A formatted PDF with all your answers, organized by section</li>
-            <li>✔ Each answer labeled with the corresponding USCIS question</li>
-            <li>✔ Instructions for obtaining and filing the official form</li>
+            <li>✔ The official USCIS {form.formId} form with your answers pre-filled</li>
+            <li>✔ All key fields completed — name, address, dates, contact info</li>
+            <li>✔ Ready to print and sign before mailing to USCIS</li>
           </ul>
           <p className="text-navy-400 text-xs mt-3">
-            Note: USCIS forms use Adobe XFA technology. Transfer your answers into the official fillable PDF from
-            <span className="text-amber-400"> uscis.gov/forms/{form.formId.toLowerCase()}</span>
+            Review every field carefully before filing. Some supplemental fields may need to be filled manually.
           </p>
         </div>
       </div>
