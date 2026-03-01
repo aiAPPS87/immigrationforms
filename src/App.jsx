@@ -51,7 +51,7 @@ const FORMS_DB = [
           { id: 'father_name',    label: "What is your father's first (given) name?",        hint: 'Enter his first name at the time of your birth.',            type: 'text',   required: true,  pdfFieldMapping: 'P1_Line13_FatherGivenName[0]' },
           { id: 'class_of_admission', label: 'What was your class of admission?',            hint: 'This is the visa type used to enter the U.S. (e.g., IR1, F2A, DV). Found on your Green Card.',  type: 'text', required: true, pdfFieldMapping: 'P1_Line14_ClassOfAdmission[0]' },
           { id: 'date_of_admission',  label: 'What was your date of admission?',             hint: 'The date you were admitted as a permanent resident. Check your Green Card.',    type: 'date', required: true, pdfFieldMapping: 'P1_Line15_DateOfAdmission[0]' },
-          { id: 'ssn',            label: 'What is your Social Security Number? (if any)',     hint: 'Format: XXX-XX-XXXX. Leave blank if not issued.',            type: 'text',   required: false, pdfFieldMapping: 'P1_Line16_SSN[0]' },
+          // SSN is intentionally not collected — highlighted in yellow on the downloaded PDF
         ],
       },
       {
@@ -153,7 +153,7 @@ const FORMS_DB = [
           { id: 'other_given1',    label: 'Other name — given name',                                hint: '',                                                                      type: 'text',   required: true,  pdfFieldMapping: 'Line3_GivenName1[0]',  condition: { field: 'other_names', value: 'yes' } },
           { id: 'alien_number',    label: 'Alien Registration Number (A-Number)',                   hint: 'Found on your Green Card, starts with "A".',                            type: 'text',   required: true,  pdfFieldMapping: 'Line1_AlienNumber[0]' },
           { id: 'uscis_account',   label: 'USCIS Online Account Number (if any)',                   hint: '12-digit number. Leave blank if none.',                                  type: 'text',   required: false, pdfFieldMapping: 'P2_Line6_USCISELISAcctNumber[0]' },
-          { id: 'ssn',             label: 'Social Security Number',                                 hint: 'Format: XXX-XX-XXXX.',                                                  type: 'text',   required: false, pdfFieldMapping: 'Line12b_SSN[0]' },
+          // SSN is intentionally not collected — highlighted in yellow on the downloaded PDF
           { id: 'dob',             label: 'Date of birth',                                          hint: 'MM/DD/YYYY',                                                            type: 'date',   required: true,  pdfFieldMapping: 'P2_Line8_DateOfBirth[0]' },
           { id: 'sex',             label: 'Sex',                                                    hint: '',                                                                      type: 'select', required: true,  pdfFieldMapping: 'P2_Line7_Gender[0]', options: ['Male', 'Female'] },
           { id: 'country_birth',   label: 'Country of birth',                                       hint: 'Use the current name of the country.',                                  type: 'text',   required: true,  pdfFieldMapping: 'P2_Line10_CountryOfBirth[0]' },
@@ -266,7 +266,7 @@ const FORMS_DB = [
           { id: 'country_citizen', label: 'Country of citizenship or nationality',  hint: '',                                                         type: 'text',   required: true,  pdfFieldMapping: 'Part2_Line7_CountryOfCitizenshiporNationality[0]' },
           { id: 'alien_number',    label: 'Alien Registration Number (A-Number)',   hint: 'Starts with "A" — 8 or 9 digits.',                        type: 'text',   required: true,  pdfFieldMapping: 'Part2_Line5_AlienNumber[0]' },
           { id: 'uscis_account',   label: 'USCIS Online Account Number (if any)',   hint: '12-digit number. Leave blank if none.',                    type: 'text',   required: false, pdfFieldMapping: 'Part2_Line11_USCISOnlineAcctNumber[0]' },
-          { id: 'ssn',             label: 'Social Security Number (if any)',         hint: 'Leave blank if not issued.',                               type: 'text',   required: false, pdfFieldMapping: 'Part2_Line10_SSN[0]' },
+          // SSN is intentionally not collected — highlighted in yellow on the downloaded PDF
           { id: 'class_of_admission', label: 'Class of admission (visa type)',      hint: 'e.g., IR1, LPR, RE, AS. Found on your Green Card or I-94.', type: 'text', required: false, pdfFieldMapping: 'Part2_Line12_ClassofAdmission[0]' },
           { id: 'i94_number',      label: 'I-94 Arrival/Departure Record Number',   hint: 'Find it at i94.cbp.dhs.gov.',                             type: 'text',   required: false, pdfFieldMapping: 'Part2_Line13_I94RecordNo[0]' },
         ],
@@ -1417,6 +1417,35 @@ async function fillUSCISPDF(form, answers) {
     }
   }
 
+  // ── Highlight SSN field in yellow — user must fill this in manually ──────────
+  const ssnActions = drawMap['ssn']
+  if (ssnActions) {
+    const YELLOW = rgb(1, 0.95, 0)
+    const helv10 = helv
+    for (const action of ssnActions) {
+      const coords = fieldCoords[action.f]
+      if (!coords) continue
+      for (const { page: pageIdx, rect } of coords) {
+        if (!rect || pageIdx == null || pageIdx >= libPages.length) continue
+        const libPage = libPages[pageIdx]
+        const [x1, y1, x2, y2] = rect
+        const fw = x2 - x1
+        const fh = y2 - y1
+        // Semi-transparent yellow fill
+        libPage.drawRectangle({ x: x1, y: y1, width: fw, height: fh, color: YELLOW, opacity: 0.55 })
+        // Yellow border to make it stand out further
+        libPage.drawRectangle({ x: x1 - 1, y: y1 - 1, width: fw + 2, height: fh + 2,
+          borderColor: rgb(0.85, 0.6, 0), borderWidth: 1.2, opacity: 1 })
+        // Small label above the field
+        libPage.drawText('▶ Fill in your SSN here', {
+          x: x1, y: y2 + 2,
+          size: 6.5, font: helv10,
+          color: rgb(0.55, 0.3, 0),
+        })
+      }
+    }
+  }
+
   return newDoc.save()
 }
 
@@ -1730,6 +1759,17 @@ function DownloadScreen({ state, dispatch, t }) {
           </ul>
           <p className="text-navy-400 text-xs mt-3">
             Review every field carefully before filing. Some supplemental fields may need to be filled manually.
+          </p>
+        </div>
+
+        {/* SSN notice */}
+        <div className="mt-4 max-w-md mx-auto rounded-xl p-4 text-left border-2 border-yellow-400 bg-yellow-400/15">
+          <p className="text-yellow-300 text-xs font-bold uppercase tracking-widest mb-1.5">⚠ Action required — Social Security Number</p>
+          <p className="text-yellow-100 text-sm leading-relaxed">
+            For privacy, your Social Security Number (SSN) was <span className="font-bold">not</span> collected during this session.
+            Open the downloaded PDF and look for the{' '}
+            <span className="inline-block bg-yellow-400 text-yellow-900 font-bold px-1.5 py-0.5 rounded text-xs">yellow highlighted field</span>
+            {' '}— that is where you must write in your SSN before filing.
           </p>
         </div>
       </div>
