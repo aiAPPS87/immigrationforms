@@ -2,6 +2,7 @@
 // Single-file React application | Vite + Tailwind
 import { useState, useReducer, useEffect, useCallback, useRef } from 'react'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
+import { T, LANG_NAMES, getLabel, getSectionTitle, getOptionLabels } from './translations.js'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
@@ -394,85 +395,7 @@ function clearStorage(formId) {
   try { localStorage.removeItem(`formpath_${formId}`) } catch {}
 }
 
-// ─────────────────────────────────────────────
-// TRANSLATIONS (English + Spanish)
-// ─────────────────────────────────────────────
-const T = {
-  en: {
-    appName: 'FormPath',
-    tagline: 'Your guided immigration form assistant',
-    findMyForm: 'Find My Form',
-    continueWhere: 'Continue Where I Left Off',
-    back: 'Back',
-    next: 'Next',
-    saveAndContinue: 'Save & Continue Later',
-    reviewAnswers: 'Review My Answers',
-    downloadPDF: 'Download PDF',
-    startOver: 'Start a New Form',
-    required: 'Required',
-    optional: 'Optional',
-    yes: 'Yes',
-    no: 'No',
-    step: 'Step',
-    of: 'of',
-    complete: 'complete',
-    reviewTitle: 'Review Your Answers',
-    reviewSubtitle: 'Check everything looks right before we generate your form.',
-    edit: 'Edit',
-    formComplete: 'Your form is ready!',
-    completeSub: "We've prepared your completed form. Download it below.",
-    nextSteps: 'Next Steps',
-    whatFormNeed: 'What form do I need?',
-    searchForms: 'Search forms…',
-    allCategories: 'All',
-    difficulty: 'Difficulty',
-    time: 'Est. time',
-    fee: 'Filing fee',
-    startForm: 'Start this form',
-    formReadiness: 'Form readiness',
-    emptyRequired: 'Some required fields are still empty.',
-    skipQuestion: 'Skip for now',
-    tooltip: 'Why are we asking this?',
-    langToggle: 'Español',
-  },
-  es: {
-    appName: 'FormPath',
-    tagline: 'Su asistente guiado de formularios de inmigración',
-    findMyForm: 'Encontrar mi formulario',
-    continueWhere: 'Continuar donde lo dejé',
-    back: 'Atrás',
-    next: 'Siguiente',
-    saveAndContinue: 'Guardar y continuar después',
-    reviewAnswers: 'Revisar mis respuestas',
-    downloadPDF: 'Descargar PDF',
-    startOver: 'Comenzar un nuevo formulario',
-    required: 'Requerido',
-    optional: 'Opcional',
-    yes: 'Sí',
-    no: 'No',
-    step: 'Paso',
-    of: 'de',
-    complete: 'completo',
-    reviewTitle: 'Revisa tus respuestas',
-    reviewSubtitle: 'Verifica que todo esté correcto antes de generar tu formulario.',
-    edit: 'Editar',
-    formComplete: '¡Tu formulario está listo!',
-    completeSub: 'Hemos preparado tu formulario completo. Descárgalo a continuación.',
-    nextSteps: 'Próximos pasos',
-    whatFormNeed: '¿Qué formulario necesito?',
-    searchForms: 'Buscar formularios…',
-    allCategories: 'Todos',
-    difficulty: 'Dificultad',
-    time: 'Tiempo est.',
-    fee: 'Tarifa de presentación',
-    startForm: 'Comenzar este formulario',
-    formReadiness: 'Preparación del formulario',
-    emptyRequired: 'Algunos campos obligatorios aún están vacíos.',
-    skipQuestion: 'Omitir por ahora',
-    tooltip: '¿Por qué preguntamos esto?',
-    langToggle: 'English',
-  },
-}
+// T, LANG_NAMES, getLabel, getSectionTitle, getOptionLabels imported from ./translations.js
 
 // ─────────────────────────────────────────────
 // UTILITIES
@@ -583,7 +506,7 @@ function Breadcrumb({ items, t }) {
 // ─────────────────────────────────────────────
 // QUESTION RENDERER
 // ─────────────────────────────────────────────
-function QuestionRenderer({ question, value, onChange, t, error }) {
+function QuestionRenderer({ question, value, onChange, t, lang, error }) {
   const inputRef = useRef(null)
   useEffect(() => { if (inputRef.current) inputRef.current.focus() }, [question.id])
 
@@ -612,6 +535,8 @@ function QuestionRenderer({ question, value, onChange, t, error }) {
   }
 
   if (question.type === 'select') {
+    // Translated labels for display; English values stored in answers (for FIELD_DRAW_MAP)
+    const optLabels = getOptionLabels(lang, question.id, question.options)
     return (
       <select
         ref={inputRef}
@@ -622,8 +547,10 @@ function QuestionRenderer({ question, value, onChange, t, error }) {
         aria-invalid={!!error}
         aria-describedby={error ? `${question.id}-error` : undefined}
       >
-        <option value="">— Select one —</option>
-        {question.options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+        <option value="">{t.selectOne || '— Select one —'}</option>
+        {question.options.map((opt, i) => (
+          <option key={opt} value={opt}>{optLabels[i] || opt}</option>
+        ))}
       </select>
     )
   }
@@ -636,7 +563,7 @@ function QuestionRenderer({ question, value, onChange, t, error }) {
         onChange={e => onChange(e.target.value)}
         rows={4}
         className={`${baseInput} resize-none ${error ? 'border-red-400' : ''}`}
-        placeholder="Type your answer here…"
+        placeholder={t.placeholder || 'Type your answer here…'}
         aria-required={question.required}
         aria-invalid={!!error}
         aria-describedby={error ? `${question.id}-error` : undefined}
@@ -668,7 +595,7 @@ function QuestionRenderer({ question, value, onChange, t, error }) {
       value={value || ''}
       onChange={e => onChange(e.target.value)}
       className={`${baseInput} ${error ? 'border-red-400' : ''}`}
-      placeholder="Type your answer here…"
+      placeholder={t.placeholder || 'Type your answer here…'}
       aria-required={question.required}
       aria-invalid={!!error}
       aria-describedby={error ? `${question.id}-error` : undefined}
@@ -936,7 +863,7 @@ function FormQuiz({ t, onSelect, onBack }) {
 // WIZARD ENGINE
 // ─────────────────────────────────────────────
 function WizardEngine({ state, dispatch, t }) {
-  const { selectedForm: form, answers, currentSectionIdx, currentQuestionIdx, direction } = state
+  const { selectedForm: form, answers, currentSectionIdx, currentQuestionIdx, direction, lang } = state
   const [error, setError] = useState(null)
   const [animKey, setAnimKey] = useState(0)
 
@@ -1001,14 +928,14 @@ function WizardEngine({ state, dispatch, t }) {
           {/* Section badge */}
           <div className="flex items-center gap-2 mb-6">
             <span className="text-xs font-bold text-amber-600 uppercase tracking-widest bg-amber-50 border border-amber-200 px-3 py-1 rounded-full">
-              {section.title}
+              {getSectionTitle(lang, section.id, section.title)}
             </span>
           </div>
 
           {/* Question */}
           <div className="mb-6">
             <label className="label" htmlFor={question.id}>
-              {question.label}
+              {getLabel(lang, question.id, question.label)}
               {question.required
                 ? <span className="text-red-500 ml-1" aria-label="required">*</span>
                 : <span className="text-stone-400 text-sm font-normal ml-2">({t.optional})</span>
@@ -1022,6 +949,7 @@ function WizardEngine({ state, dispatch, t }) {
               value={answers[question.id]}
               onChange={val => dispatch({ type: 'SET_ANSWER', id: question.id, value: val })}
               t={t}
+              lang={lang}
               error={error}
             />
 
@@ -1066,7 +994,7 @@ function WizardEngine({ state, dispatch, t }) {
 // REVIEW SCREEN
 // ─────────────────────────────────────────────
 function ReviewScreen({ state, dispatch, t }) {
-  const { selectedForm: form, answers } = state
+  const { selectedForm: form, answers, lang } = state
   const readiness = computeReadiness(form, answers)
   const [editingId, setEditingId] = useState(null)
 
@@ -1120,7 +1048,7 @@ function ReviewScreen({ state, dispatch, t }) {
           return (
             <div key={section.id} className="bg-white rounded-2xl shadow-sm border border-stone-100 mb-6 overflow-hidden">
               <div className="bg-navy-50 border-b border-stone-200 px-6 py-4">
-                <h2 className="text-lg font-bold text-navy-900">{section.title}</h2>
+                <h2 className="text-lg font-bold text-navy-900">{getSectionTitle(lang, section.id, section.title)}</h2>
               </div>
               <div className="divide-y divide-stone-100">
                 {visibleQs.map(q => {
@@ -1131,7 +1059,7 @@ function ReviewScreen({ state, dispatch, t }) {
                     <div key={q.id} className={`px-6 py-4 ${isEmpty && q.required ? 'bg-red-50' : ''}`}>
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1">
-                          <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide mb-0.5">{q.label}</p>
+                          <p className="text-xs font-semibold text-stone-400 uppercase tracking-wide mb-0.5">{getLabel(lang, q.id, q.label)}</p>
                           {isEditing ? (
                             <div className="mt-2">
                               <QuestionRenderer
@@ -1139,6 +1067,7 @@ function ReviewScreen({ state, dispatch, t }) {
                                 value={answers[q.id]}
                                 onChange={val => dispatch({ type: 'SET_ANSWER', id: q.id, value: val })}
                                 t={t}
+                                lang={lang}
                                 error={null}
                               />
                               <button
@@ -1857,18 +1786,38 @@ function DownloadScreen({ state, dispatch, t }) {
 }
 
 // ─────────────────────────────────────────────
-// LANGUAGE SWITCHER
+// LANGUAGE SWITCHER — 10-language dropdown
 // ─────────────────────────────────────────────
 function LanguageSwitcher({ lang, dispatch }) {
+  const [open, setOpen] = useState(false)
   return (
-    <button
-      onClick={() => dispatch({ type: 'SET_LANG', lang: lang === 'en' ? 'es' : 'en' })}
-      className="fixed bottom-6 right-6 z-50 flex items-center gap-2 px-4 py-2.5 bg-navy-900 text-white rounded-full shadow-xl hover:bg-navy-700 transition-colors text-sm font-semibold"
-      aria-label="Toggle language"
-    >
-      <Icon.Globe />
-      {lang === 'en' ? 'Español' : 'English'}
-    </button>
+    <div className="fixed bottom-6 right-6 z-50">
+      {open && (
+        <div className="absolute bottom-14 right-0 bg-white border border-stone-200 rounded-2xl shadow-2xl overflow-hidden w-48 mb-1">
+          {Object.entries(LANG_NAMES).map(([code, name]) => (
+            <button
+              key={code}
+              onClick={() => { dispatch({ type: 'SET_LANG', lang: code }); setOpen(false) }}
+              className={`w-full text-left px-4 py-2.5 text-sm transition-colors
+                ${code === lang
+                  ? 'font-bold text-navy-900 bg-navy-50'
+                  : 'text-stone-700 hover:bg-stone-50'}`}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-2 px-4 py-2.5 bg-navy-900 text-white rounded-full shadow-xl hover:bg-navy-700 transition-colors text-sm font-semibold"
+        aria-label="Change language"
+        aria-expanded={open}
+      >
+        <Icon.Globe />
+        {LANG_NAMES[lang]}
+      </button>
+    </div>
   )
 }
 
